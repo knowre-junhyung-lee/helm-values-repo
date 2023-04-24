@@ -1,0 +1,7 @@
+nodeSelector:
+  nodegroup-type: "mgt"
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: "NoSchedule"

@@ -1,0 +1,59 @@
+nameOverride: cluster-autoscaler
+
+nodeSelector:
+  nodegroup-type: "mgt"
+
+autoDiscovery:
+  clusterName: dev-apne3-jp-blue-cluster
+
+awsRegion: ""
+
+cloudProvider: aws
+
+dnsPolicy: ""
+
+# extraArgs -- Additional container arguments.
+# Refer to https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#what-are-the-parameters-to-ca for the full list of cluster autoscaler
+extraArgs:
+  expander: least-waste
+  skip-nodes-with-local-storage: "false"
+  balance-similar-node-groups: "true"
+  skip-nodes-with-system-pods: "false"
+
+extraVolumeMounts:
+  - name: ssl-certs
+    mountPath: /etc/ssl/certs/ca-certificates.crt
+    readOnly: true
+
+extraVolumes:
+  - name: ssl-certs
+    hostPath:
+      path: /etc/ssl/certs/ca-bundle.crt
+
+image:
+  pullPolicy: "Always"
+
+podDisruptionBudget: ""
+
+rbac:
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::524525419461:role/dev-apne3-jp-cluster-autoscaler-eks-blue-role
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 600Mi
+  requests:
+    cpu: 100m
+    memory: 600Mi
+
+podAnnotations:
+  prometheus.io/scrape: 'true'
+  prometheus.io/port: '8085'
+  cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: "NoSchedule"

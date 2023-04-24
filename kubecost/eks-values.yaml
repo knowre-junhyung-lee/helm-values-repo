@@ -1,0 +1,237 @@
+global:
+  grafana:
+    enabled: false
+    proxy: false
+
+pricingCsv:
+  enabled: false
+  location:
+    provider: "AWS"
+    region: "us-east-1" 
+    URI: s3://kc-csv-test/pricing_schema.csv # a valid file URI
+    csvAccessCredentials: pricing-schema-access-secret
+
+nodeSelector:
+  nodegroup-type: "mgt"
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: "NoSchedule"
+
+affinity: {}
+
+# If true, creates a PriorityClass to be used by the cost-analyzer pod
+priority:
+  enabled: false
+  # value: 1000000
+
+# If true, enable creation of NetworkPolicy resources.
+networkPolicy:
+  enabled: false
+
+podSecurityPolicy:
+  enabled: false
+
+# Enable this flag if you need to install with specfic image tags
+# imageVersion: prod-1.97.0
+
+kubecostFrontend:
+  image: public.ecr.aws/kubecost/frontend
+  imagePullPolicy: Always
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "55Mi"
+    #limits:
+    #  cpu: "100m"
+    #  memory: "256Mi"
+  
+kubecostModel:
+  image: public.ecr.aws/kubecost/cost-model
+  imagePullPolicy: Always
+  warmCache: true
+  warmSavingsCache: true
+  etl: true
+  # The total number of days the ETL storage will build
+  etlStoreDurationDays: 120
+  maxQueryConcurrency: 5
+  # utcOffset represents a timezone in hours and minutes east (+) or west (-)
+  # of UTC, itself, which is defined as +00:00.
+  # See the tz database of timezones to look up your local UTC offset:
+  # https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+  utcOffset: "+00:00"
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "55Mi"
+    #limits:
+    #  cpu: "800m"
+    #  memory: "256Mi"
+
+serviceAccount:
+  create: true # Set this to false if you're bringing your own service account.
+  annotations: {}
+  # name: kc-test
+
+# Define persistence volume for cost-analyzer
+persistentVolume:
+  size: 32Gi
+  dbSize: 32.0Gi
+  enabled: true # Note that setting this to false means configurations will be wiped out on pod restart.
+  # storageClass: "-" #
+  # existingClaim: kubecost-cost-analyzer # a claim in the same namespace as kubecost
+
+ingress:
+  enabled: false
+  # className: nginx
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    # kubernetes.io/tls-acme: "true"
+  paths: ["/"] # There's no need to route specifically to the pods-- we have an nginx deployed that handles routing
+  hosts:
+    - cost-analyzer.local
+  tls: []
+  #  - secretName: cost-analyzer-tls
+  #    hosts:
+  #      - cost-analyzer.local
+
+service:
+  type: ClusterIP
+  port: 9090
+  targetPort: 9090
+  # nodePort:
+  labels: {}
+  annotations: {}
+
+prometheus:
+  server:
+    # If clusterIDConfigmap is defined, instead use user-generated configmap with key CLUSTER_ID
+    # to use as unique cluster ID in kubecost cost-analyzer deployment.
+    # This overrides the cluster_id set in prometheus.server.global.external_labels.
+    # NOTE: This does not affect the external_labels set in prometheus config.
+    # clusterIDConfigmap: cluster-id-configmap
+    image:
+      repository: public.ecr.aws/kubecost/prometheus
+      tag: v2.35.0
+    resources: {}
+    # limits:
+    #   cpu: 500m
+    #   memory: 512Mi
+    # requests:
+    #   cpu: 500m
+    #   memory: 512Mi
+    global:
+      scrape_interval: 1m
+      scrape_timeout: 10s
+      evaluation_interval: 1m
+      external_labels:
+        cluster_id: cluster-one # Each cluster should have a unique ID
+    persistentVolume:
+      size: 32Gi
+      enabled: true
+      # storageClass: gp3
+      # storageClassName: gp3
+    extraArgs:
+      query.max-concurrency: 1
+      query.max-samples: 100000000
+    tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+        effect: "NoSchedule"
+
+  configmapReload:
+    prometheus:
+      ## If false, the configmap-reload container will not be deployed
+      ##
+      enabled: false
+
+      ## configmap-reload container name
+      ##
+      name: configmap-reload
+      ## configmap-reload container image
+      ##
+      image:
+        repository: public.ecr.aws/bitnami/configmap-reload
+        tag: 0.7.1
+        pullPolicy: IfNotPresent
+      ## Additional configmap-reload container arguments
+      ##
+      extraArgs: {}
+      ## Additional configmap-reload volume directories
+      ##
+      extraVolumeDirs: []
+      ## Additional configmap-reload mounts
+      ##
+      extraConfigmapMounts: []
+        # - name: prometheus-alerts
+        #   mountPath: /etc/alerts.d
+        #   subPath: ""
+        #   configMap: prometheus-alerts
+        #   readOnly: true
+      ## configmap-reload resource requests and limits
+      ## Ref: http://kubernetes.io/docs/user-guide/compute-resources/
+      ##
+      resources: {}
+     
+  kube-state-metrics:
+    disabled: false
+  nodeExporter:
+    enabled: true
+  serverFiles: 
+  #  prometheus.yml: # Sample block -- enable if using an in cluster durable store.
+  #      remote_write:
+  #        - url: "http://pgprometheus-adapter:9201/write"
+  #          write_relabel_configs:
+  #            - source_labels: [__name__]
+  #              regex: 'container_.*_allocation|container_.*_allocation_bytes|.*_hourly_cost|kube_pod_container_resource_requests_memory_bytes|container_memory_working_set_bytes|kube_pod_container_resource_requests_cpu_cores|kube_pod_container_resource_requests|pod_pvc_allocation|kube_namespace_labels|kube_pod_labels'
+  #              action: keep
+  #          queue_config:
+  #            max_samples_per_send: 1000
+        #remote_read:
+        #  - url: "http://pgprometheus-adapter:9201/read"
+    rules:
+      groups:
+        - name: CPU
+          rules:
+            - expr: sum(rate(container_cpu_usage_seconds_total{container_name!=""}[5m]))
+              record: cluster:cpu_usage:rate5m
+            - expr: rate(container_cpu_usage_seconds_total{container_name!=""}[5m])
+              record: cluster:cpu_usage_nosum:rate5m
+            - expr: avg(irate(container_cpu_usage_seconds_total{container_name!="POD", container_name!=""}[5m])) by (container_name,pod_name,namespace)
+              record: kubecost_container_cpu_usage_irate
+            - expr: sum(container_memory_working_set_bytes{container_name!="POD",container_name!=""}) by (container_name,pod_name,namespace)
+              record: kubecost_container_memory_working_set_bytes
+            - expr: sum(container_memory_working_set_bytes{container_name!="POD",container_name!=""})
+              record: kubecost_cluster_memory_working_set_bytes
+        - name: Savings
+          rules:
+            - expr: sum(avg(kube_pod_owner{owner_kind!="DaemonSet"}) by (pod) * sum(container_cpu_allocation) by (pod))
+              record: kubecost_savings_cpu_allocation
+              labels:
+                daemonset: "false"
+            - expr: sum(avg(kube_pod_owner{owner_kind="DaemonSet"}) by (pod) * sum(container_cpu_allocation) by (pod)) / sum(kube_node_info)
+              record: kubecost_savings_cpu_allocation
+              labels:
+                daemonset: "true"
+            - expr: sum(avg(kube_pod_owner{owner_kind!="DaemonSet"}) by (pod) * sum(container_memory_allocation_bytes) by (pod))
+              record: kubecost_savings_memory_allocation_bytes
+              labels:
+                daemonset: "false"
+            - expr: sum(avg(kube_pod_owner{owner_kind="DaemonSet"}) by (pod) * sum(container_memory_allocation_bytes) by (pod)) / sum(kube_node_info)
+              record: kubecost_savings_memory_allocation_bytes
+              labels:
+                daemonset: "true"
+            - expr: label_replace(sum(kube_pod_status_phase{phase="Running",namespace!="kube-system"} > 0) by (pod, namespace), "pod_name", "$1", "pod", "(.+)")
+              record: kubecost_savings_running_pods
+            - expr: sum(rate(container_cpu_usage_seconds_total{container_name!="",container_name!="POD",instance!=""}[5m])) by (namespace, pod_name, container_name, instance)
+              record: kubecost_savings_container_cpu_usage_seconds
+            - expr: sum(container_memory_working_set_bytes{container_name!="",container_name!="POD",instance!=""}) by (namespace, pod_name, container_name, instance)
+              record: kubecost_savings_container_memory_usage_bytes
+            - expr: avg(sum(kube_pod_container_resource_requests_cpu_cores{namespace!="kube-system"}) by (pod, namespace, instance)) by (pod, namespace)
+              record: kubecost_savings_pod_requests_cpu_cores
+            - expr: avg(sum(kube_pod_container_resource_requests_memory_bytes{namespace!="kube-system"}) by (pod, namespace, instance)) by (pod, namespace)
+              record: kubecost_savings_pod_requests_memory_bytes
+
+reporting:
+  productAnalytics: true

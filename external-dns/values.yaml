@@ -1,0 +1,32 @@
+namespace: kube-system
+
+## ServiceAccount parameters
+## https://kubernetes.io/docs/tasks/configure-pod-container/configure-service-account/
+##
+serviceAccount:
+  ## @param serviceAccount.create Determine whether a Service Account should be created or it should reuse a exiting one.
+  ##
+  create: true
+  ## @param serviceAccount.name ServiceAccount to use. A name is generated using the external-dns.fullname template if it is not set
+  ##
+  name: "external-dns"
+  ## @param serviceAccount.annotations Additional Service Account annotations
+  ##
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::524525419461:role/dev-apne3-jp-external-dns-eks-blue-role
+  ## @param serviceAccount.automountServiceAccountToken Automount API credentials for a service account.
+  ##
+  automountServiceAccountToken: true
+  ## @param serviceAccount.labels [object] Additional labels to be included on the service account
+  ##
+  labels:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/name: external-dns
+
+nodeSelector:
+  nodegroup-type: "mgt"
+
+tolerations:
+  - key: CriticalAddonsOnly
+    operator: Exists
+    effect: "NoSchedule"
